@@ -1,4 +1,5 @@
 static handler handlers[] = {
-	{ "GET",   "/", file_serve_handler, "." },
-	{ "POST",  "/", spawn_handler, "echo test123" }
+	{ "GET",   "/test", redirect_handler, "/" },
+	{ "GET",   "/", serve_dir_handler, "." },
+	{ "POST",  "/", data_handler, "ls -lh" }
 };
