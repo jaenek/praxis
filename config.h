@@ -1,6 +1,4 @@
-#define SH(cmd) { "sh", "-c", cmd, NULL }
-
 static handler handlers[] = {
-	{ "GET",   "/", hello_handler, NULL },
-	{ "POST",  "/", spawn_handler, SH("xsetroot -name test") }
+	{ "GET",   "/", file_serve_handler, "." },
+	{ "POST",  "/", spawn_handler, "echo test123" }
 };
