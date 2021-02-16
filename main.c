@@ -6,54 +6,54 @@
 #define LENGTH(X)   (sizeof X / sizeof X[0])
 #define STRFMT(str) (int) str.len, str.ptr
 
-typedef struct {
+union args {
+	const char* path;
+	const char* command;
+	const void* v;
+};
+
+struct handler{
 	const char* method;
 	const char* path;
-	void (*func)(struct mg_connection* con, struct mg_http_message* data, const char*);
-	const void* args;
-} handler;
+	void (*func)(struct mg_connection* con, struct mg_http_message* data, const union args* args);
+	const union args args;
+};
 
-void serve_dir_handler(struct mg_connection* con, struct mg_http_message* msg, const char* dir_path) {
-	struct mg_http_serve_opts opts = {dir_path};
-	mg_http_serve_dir(con, msg, &opts);
-}
-
-void redirect_handler(struct mg_connection* con, struct mg_http_message* msg, const char* url) {
-	const char* header_fmt = "HTTP/1.1 302 Moved Permanently\r\nLocation: %s\r\nContent-Length: 0\r\n\r\n";
-	size_t len = strlen(url) + strlen(header_fmt)-1;
+void redirect_handler(struct mg_connection* con, struct mg_http_message* msg, const union args* args) {
+	const char* header_fmt = "HTTP/1.1 302 Found\r\nLocation: %s\r\nContent-Length: 0\r\n\r\n";
+	size_t len = strlen(args->path) + strlen(header_fmt)-1;
 	char* header = malloc(len);
-	snprintf(header, len, header_fmt, url);
+	snprintf(header, len, header_fmt, args->path);
 	mg_send(con, header, len);
 	free(header);
 }
 
-void spawn_handler(struct mg_connection* con, struct mg_http_message* msg, const char* command) {
+void spawn_handler(struct mg_connection* con, struct mg_http_message* msg, const union args* args) {
 	pid_t pid;
 	if ((pid = fork()) == 0) {
 		setsid();
-		execl("/usr/bin/sh", "sh", "-c", command);
-		printf("praxis: execl %s", command);
+		execl("/usr/bin/sh", "sh", "-c", args->command);
+		printf("praxis: execl %s", args->command);
 		perror(" failed");
 		exit(EXIT_SUCCESS);
 	} else if(pid == -1) {
 		mg_http_reply(con, 500, "", "Error occured\r\n");
 		perror("praxis: fork() failed");
 	}
-	mg_http_reply(con, 200, "", "Ok!\r\n");
 	waitpid(pid, NULL, WNOHANG);
 }
 
 #define CHUNK 1024
-void data_handler(struct mg_connection* con, struct mg_http_message* msg, const char* command) {
+void data_handler(struct mg_connection* con, struct mg_http_message* msg, const union args* args) {
 	struct { char* ptr; size_t len; size_t size; } output = {
 		.ptr = malloc(CHUNK),
 		.size = CHUNK
 	};
 
-	FILE *p = popen(command, "r");
+	FILE *p = popen(args->command, "r");
 	if (p == NULL) {
 		mg_http_reply(con, 500, "", "Error occured\r\n");
-		printf("praxis: popen %s", command);
+		printf("praxis: popen %s", args->command);
 		perror(" failed");
 		free(output.ptr);
 		return;
@@ -78,9 +78,6 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 
 // include user configuration after usable function/structure definitions
 #include "examples/blog/config.h"
-#ifndef SRV_PATH
-#define SRV_PATH "."
-#endif
 
 static void handle_request(struct mg_connection* con, int event, void* data, void* fn_data) {
 	(void) fn_data; // function specific data (not used)
@@ -93,7 +90,7 @@ static void handle_request(struct mg_connection* con, int event, void* data, voi
 	for (int i = 0; i < LENGTH(handlers); i++) {
 		if (!mg_http_match_uri(msg, handlers[i].path)) {
 			if (i == LENGTH(handlers) - 1) {
-				serve_dir_handler(con, msg, SRV_PATH);
+				mg_http_serve_dir(con, msg, &(struct mg_http_serve_opts){ root_dir, "#.shtml" });
 				break;
 			} else {
 				continue;
@@ -102,12 +99,10 @@ static void handle_request(struct mg_connection* con, int event, void* data, voi
 
 		if (mg_strcmp(msg->method, mg_str(handlers[i].method)) == 0) {
 			LOG(LL_INFO, ("\n%.*s", STRFMT(msg->message)));
-			handlers[i].func(con, data, handlers[i].args);
+			handlers[i].func(con, data, &handlers[i].args);
 		}
 	}
 }
-
-static const char *listen_on = "http://localhost:8000";
 
 int main(void) {
 	struct mg_mgr mgr;

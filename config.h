@@ -1,5 +1,7 @@
+static const char* listen_on = "http://localhost:8000";
+static const char* root_dir = ".";
+
 static handler handlers[] = {
-	{ "GET",   "/test", redirect_handler, "/" },
-	{ "GET",   "/", serve_dir_handler, "." },
-	{ "POST",  "/", data_handler, "ls -lh" }
+	{ "GET",   "/test", redirect_handler, { .s = "/index.html", } },
+	{ "POST",  "/",     data_handler,     { .s = "ls -lh", } }
 };
