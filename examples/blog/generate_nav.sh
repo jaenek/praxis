@@ -1,6 +1,5 @@
 #!/bin/sh
 
-echo '<nav>'
 for DIR in "$1"/*
 do
 	if [ -f "$DIR" ]
@@ -9,6 +8,5 @@ do
 	fi
 
 	SUBDIR=${DIR##$(dirname "$DIR")/}
-	printf '<a href=\"%s/index.html\">%s</a>\n' "/$SUBDIR" "$SUBDIR"
+	printf '<a href=\"%s/index.shtml\">%s</a>\n' "/$SUBDIR" "$SUBDIR"
 done
-echo '</nav>'

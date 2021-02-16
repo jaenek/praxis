@@ -1,21 +1,25 @@
-FILES = $(patsubst entries/%.md, public/%.html, $(shell find entries -type f -name *.md))
-INDEXES = $(patsubst entries/%, public/%/index.html, $(wildcard entries/*))
+FILES = $(patsubst entries/%.md, public/%.shtml, $(shell find entries -type f -name *.md))
+INDEXES = $(patsubst entries/%, public/%/index.shtml, $(wildcard entries/*))
 
 .PHONY: all clean
 
-all: $(FILES) $(INDEXES) public/index.html
+all: $(FILES) $(INDEXES) public/index.shtml public/navigation.html
 
 clean:
 	find public/* -maxdepth 0 -type d -exec rm -rfv {} +
-	rm -fv public/index.html
+	rm -fv public/index.shtml public/navigation.html
 
-$(FILES) : public/%.html : entries/%.md
+$(FILES) : public/%.shtml : entries/%.md
 	mkdir -pv $(shell dirname $@)
-	{ ./generate_nav.sh entries; echo '<main>'; md2html --github $^; echo '</main>'; } | ./template.sh > $@
+	{ echo '<main>'; md2html --github $^; echo '</main>'; } | ./template.sh > $@
 
-$(INDEXES): %index.html : %
-	 { ./generate_nav.sh entries; ./generate_index.sh $^; } | ./template.sh > $@
 
-public/index.html: entries
-	{ ./generate_nav.sh $^; ./generate_latest.sh $^; } | ./template.sh > $@
+$(INDEXES): %index.shtml : %
+	 ./generate_index.sh $^ | ./template.sh > $@
+
+public/navigation.html: entries
+	./generate_nav.sh $^ > $@
+
+public/index.shtml: entries
+	./generate_latest.sh $^ | ./template.sh > $@
 

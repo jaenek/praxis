@@ -10,6 +10,7 @@ target_compile_features(project_options INTERFACE c_std_11)
 
 add_library(mongoose INTERFACE)
 target_include_directories(mongoose INTERFACE vendor/mongoose)
+target_compile_definitions(mongoose INTERFACE -D MG_ENABLE_SSI)
 
 file(GLOB PROJECT_SOURCES
 	vendor/mongoose/mongoose.c
