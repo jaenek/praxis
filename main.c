@@ -20,7 +20,7 @@ void serve_dir_handler(struct mg_connection* con, struct mg_http_message* msg, c
 
 void redirect_handler(struct mg_connection* con, struct mg_http_message* msg, const char* url) {
 	const char* header_fmt = "HTTP/1.1 302 Moved Permanently\r\nLocation: %s\r\nContent-Length: 0\r\n\r\n";
-	size_t len = strlen(url) + strlen(header_fmt)-2;
+	size_t len = strlen(url) + strlen(header_fmt)-1;
 	char* header = malloc(len);
 	snprintf(header, len, header_fmt, url);
 	mg_send(con, header, len);
@@ -77,7 +77,7 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 }
 
 // include user configuration after usable function/structure definitions
-#include "config.h"
+#include "examples/blog/config.h"
 #ifndef SRV_PATH
 #define SRV_PATH "."
 #endif
@@ -85,22 +85,24 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 static void handle_request(struct mg_connection* con, int event, void* data, void* fn_data) {
 	(void) fn_data; // function specific data (not used)
 
-	struct mg_http_message* msg = (struct mg_http_message*) data;
-	if (event == MG_EV_HTTP_MSG) {
-		for (int i = 0; i < LENGTH(handlers); i++) {
-			if (!mg_http_match_uri(msg, handlers[i].path)) {
-				if (i == LENGTH(handlers) - 1) {
-					serve_dir_handler(con, msg, SRV_PATH);
-					break;
-				} else {
-					continue;
-				}
-			}
+	if (event != MG_EV_HTTP_MSG)
+		return;
 
-			if (mg_strcmp(msg->method, mg_str(handlers[i].method)) == 0) {
-				LOG(LL_INFO, ("\n%.*s", STRFMT(msg->message)));
-				handlers[i].func(con, data, handlers[i].args);
+	struct mg_http_message* msg = (struct mg_http_message*) data;
+
+	for (int i = 0; i < LENGTH(handlers); i++) {
+		if (!mg_http_match_uri(msg, handlers[i].path)) {
+			if (i == LENGTH(handlers) - 1) {
+				serve_dir_handler(con, msg, SRV_PATH);
+				break;
+			} else {
+				continue;
 			}
+		}
+
+		if (mg_strcmp(msg->method, mg_str(handlers[i].method)) == 0) {
+			LOG(LL_INFO, ("\n%.*s", STRFMT(msg->message)));
+			handlers[i].func(con, data, handlers[i].args);
 		}
 	}
 }
