@@ -1,3 +1,5 @@
+#include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <sys/wait.h>
 
@@ -40,7 +42,6 @@ void spawn_handler(struct mg_connection* con, struct mg_http_message* msg, const
 		mg_http_reply(con, 500, "", "Error occured\r\n");
 		perror("praxis: fork() failed");
 	}
-	waitpid(pid, NULL, WNOHANG);
 }
 
 #define CHUNK 1024
@@ -79,6 +80,16 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 // include user configuration after usable function/structure definitions
 #include "examples/blog/config.h"
 
+void sigchld_handler(int s)
+{
+	// waitpid() might overwrite errno, so we save and restore it:
+	int saved_errno = errno;
+
+	while(waitpid(-1, NULL, WNOHANG) > 0);
+
+	errno = saved_errno;
+}
+
 static void handle_request(struct mg_connection* con, int event, void* data, void* fn_data) {
 	(void) fn_data; // function specific data (not used)
 
@@ -106,6 +117,16 @@ static void handle_request(struct mg_connection* con, int event, void* data, voi
 
 int main(void) {
 	struct mg_mgr mgr;
+
+	// reap all dead processes
+	struct sigaction sa;
+	sa.sa_handler = sigchld_handler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESTART;
+	if (sigaction(SIGCHLD, &sa, NULL) == -1) {
+		perror("sigaction");
+		exit(1);
+	}
 
 	// Initialise stuff
 	mg_log_set("2");
