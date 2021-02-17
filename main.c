@@ -13,6 +13,7 @@
 
 bool token_auth(struct mg_http_message* msg) {
 	char token[32];
+	token[0] = '\0';
 
     mg_http_get_var(&msg->query, "access_token", token, sizeof(token));
 	if (token[0] == '\0') {
