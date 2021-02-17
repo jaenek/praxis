@@ -9,7 +9,7 @@ configure: out
 	cd $^ && cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=1 && cp compile_commands.json ../
 
 build: out
-	cd out && make
+	cd $^ && make
 
 run:
 	./out/praxis

@@ -4,26 +4,60 @@
 #include <sys/wait.h>
 
 #include "mongoose.h"
+#include "sha256.h"
 
 #define LENGTH(X)   (sizeof X / sizeof X[0])
 #define STRFMT(str) (int) str.len, str.ptr
 
+#include "tokens.h"
+
+bool token_auth(struct mg_http_message* msg) {
+	char token[32];
+
+    mg_http_get_var(&msg->query, "access_token", token, sizeof(token));
+	puts(token);
+	if (token[0] == '\0') {
+		// no password provided
+		return false;
+	}
+
+	SHA256_CTX ctx;
+	BYTE buf[SHA256_BLOCK_SIZE];
+
+	sha256_init(&ctx);
+	sha256_update(&ctx, (BYTE*)token, strlen(token));
+	sha256_final(&ctx, buf);
+	for (int i = 0; i < sizeof(buf); i++)
+		printf("%x", buf[i]);
+	puts("");
+	for (int i = 0; i < sizeof(buf); i++)
+		printf("%x", tokens[0][i]);
+	puts("");
+
+	for (int i = 0; i < LENGTH(tokens) ; i++) {
+		if (memcmp(tokens[i], buf, SHA256_BLOCK_SIZE) == 0)
+			return true;
+	}
+
+	return false;
+}
+
 union args {
 	const char* path;
 	const char* command;
-	const void* v;
 };
 
 struct handler{
 	const char* method;
 	const char* path;
-	void (*func)(struct mg_connection* con, struct mg_http_message* data, const union args* args);
+	bool (*auth_func)(struct mg_http_message*);
+	void (*handle_func)(struct mg_connection*, struct mg_http_message*, const union args*);
 	const union args args;
 };
 
 void redirect_handler(struct mg_connection* con, struct mg_http_message* msg, const union args* args) {
 	const char* header_fmt = "HTTP/1.1 302 Found\r\nLocation: %s\r\nContent-Length: 0\r\n\r\n";
-	size_t len = strlen(args->path) + strlen(header_fmt)-1;
+	size_t len = strlen(args->path) + strlen(header_fmt) - 1;
 	char* header = malloc(len);
 	snprintf(header, len, header_fmt, args->path);
 	mg_send(con, header, len);
@@ -34,7 +68,7 @@ void spawn_handler(struct mg_connection* con, struct mg_http_message* msg, const
 	pid_t pid;
 	if ((pid = fork()) == 0) {
 		setsid();
-		execl("/usr/bin/sh", "sh", "-c", args->command);
+		execl("/usr/bin/sh", "sh", "-c", args->command, NULL);
 		printf("praxis: execl %s", args->command);
 		perror(" failed");
 		exit(EXIT_SUCCESS);
@@ -78,7 +112,7 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 }
 
 // include user configuration after usable function/structure definitions
-#include "examples/blog/config.h"
+#include "config.h"
 
 void sigchld_handler(int s)
 {
@@ -109,8 +143,14 @@ static void handle_request(struct mg_connection* con, int event, void* data, voi
 		}
 
 		if (mg_strcmp(msg->method, mg_str(handlers[i].method)) == 0) {
-			LOG(LL_INFO, ("\n%.*s", STRFMT(msg->message)));
-			handlers[i].func(con, data, &handlers[i].args);
+			if (handlers[i].auth_func == NULL || handlers[i].auth_func(msg)) {
+				LOG(LL_INFO, ("\n%.*s", STRFMT(msg->message)));
+				handlers[i].handle_func(con, msg, &handlers[i].args);
+			} else {
+				char buf[40];
+				LOG(LL_INFO, ("\nAuthorizaation denied: %s", mg_straddr(con, buf, sizeof(buf))));
+				mg_printf(con, "HTTP/1.1 403 Denied\r\nContent-Length: 0\r\n\r\n");
+			}
 		}
 	}
 }
