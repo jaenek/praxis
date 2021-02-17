@@ -1,8 +1,9 @@
 static const char* listen_on = "http://localhost:8000";
 static const char* root_dir = ".";
 
+const char* input_vars[] = { "temp", "hum", NULL };
+
 static struct handler handlers[] = {
-	{ "GET",   "/test", NULL,       redirect_handler, { .path = "/index.html" } },
-	{ "GET",   "/",     NULL,       data_handler,     { .command = "ls -lh" } },
-	{ "GET",   "/auth", token_auth, data_handler,     { .command = "echo Authorized" } }
+	{ "GET",   "/",     NULL,       data_handler,     { .cmd = { .command = "tee -a incoming", .vars = input_vars } } },
+	{ "GET",   "/auth", token_auth, data_handler,     { .cmd = { .command = "echo Authorized" } } }
 };
