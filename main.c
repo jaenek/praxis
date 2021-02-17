@@ -112,6 +112,7 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 		if (mg_http_get_var(data, arg->cmd.vars[i], input, CHUNK) <= 0) {
 			LOG(LL_ERROR, ("\nData handler input failed!"));
 			mg_http_reply(con, 500, "", "Error occured\r\n");
+			kill(pid, SIGKILL);
 			return;
 		} else {
 			write(outfd[1], input, strlen(input));
@@ -124,15 +125,13 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 	if (n == CHUNK) {
 		LOG(LL_ERROR, ("\nHandler output too big! Increase CHUNK size."));
 		mg_http_reply(con, 500, "", "Error occured\r\n");
-		return;
 	} else if (n < 0) {
 		LOG(LL_ERROR, ("\nData handler output failed!"));
 		mg_http_reply(con, 500, "", "Error occured\r\n");
+	} else {
+		mg_http_reply(con, 200, "", "%s", output);
 	}
 	kill(pid, SIGKILL);
-
-
-	mg_http_reply(con, 200, "", "%s", output);
 }
 
 // include user configuration after usable function/structure definitions
