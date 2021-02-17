@@ -15,7 +15,6 @@ bool token_auth(struct mg_http_message* msg) {
 	char token[32];
 
     mg_http_get_var(&msg->query, "access_token", token, sizeof(token));
-	puts(token);
 	if (token[0] == '\0') {
 		// no password provided
 		return false;
@@ -27,12 +26,6 @@ bool token_auth(struct mg_http_message* msg) {
 	sha256_init(&ctx);
 	sha256_update(&ctx, (BYTE*)token, strlen(token));
 	sha256_final(&ctx, buf);
-	for (int i = 0; i < sizeof(buf); i++)
-		printf("%x", buf[i]);
-	puts("");
-	for (int i = 0; i < sizeof(buf); i++)
-		printf("%x", tokens[0][i]);
-	puts("");
 
 	for (int i = 0; i < LENGTH(tokens) ; i++) {
 		if (memcmp(tokens[i], buf, SHA256_BLOCK_SIZE) == 0)
@@ -148,7 +141,7 @@ static void handle_request(struct mg_connection* con, int event, void* data, voi
 				handlers[i].handle_func(con, msg, &handlers[i].args);
 			} else {
 				char buf[40];
-				LOG(LL_INFO, ("\nAuthorizaation denied: %s", mg_straddr(con, buf, sizeof(buf))));
+				LOG(LL_INFO, ("\nAuthorization denied: %s", mg_straddr(con, buf, sizeof(buf))));
 				mg_printf(con, "HTTP/1.1 403 Denied\r\nContent-Length: 0\r\n\r\n");
 			}
 		}
