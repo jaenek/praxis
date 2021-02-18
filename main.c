@@ -96,6 +96,8 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 		execl("/usr/bin/sh", "sh", "-c", arg->cmd.command, NULL);
 		printf("praxis: execl %s", arg->cmd.command);
 		perror(" failed");
+		close(infd[1]);
+		close(outfd[0]);
 		exit(EXIT_SUCCESS);
 	} else if(pid == -1) {
 		mg_http_reply(con, 500, "", "Error occured\r\n");
@@ -103,6 +105,7 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 		return;
 	}
 
+	// close unused
 	close(infd[1]);
 	close(outfd[0]);
 
@@ -112,8 +115,7 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 		if (mg_http_get_var(data, arg->cmd.vars[i], input, CHUNK) <= 0) {
 			LOG(LL_ERROR, ("\nData handler input failed!"));
 			mg_http_reply(con, 500, "", "Error occured\r\n");
-			kill(pid, SIGKILL);
-			return;
+			goto cleanup;
 		} else {
 			write(outfd[1], input, strlen(input));
 			write(outfd[1], "\n", 1);
@@ -131,6 +133,10 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 	} else {
 		mg_http_reply(con, 200, "", "%s", output);
 	}
+
+cleanup:
+	close(infd[0]);
+	close(outfd[1]);
 	kill(pid, SIGKILL);
 }
 
