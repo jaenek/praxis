@@ -89,6 +89,8 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 	pipe(infd);
 	pipe(outfd);
 	if ((pid = fork()) == 0) {
+		close(infd[0]);
+		close(outfd[1]);
 		dup2(outfd[0], STDIN_FILENO);
 		dup2(infd[1], STDOUT_FILENO);
 		dup2(infd[1], STDERR_FILENO);
@@ -115,12 +117,14 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 		if (mg_http_get_var(data, arg->cmd.vars[i], input, CHUNK) <= 0) {
 			LOG(LL_ERROR, ("\nData handler input failed!"));
 			mg_http_reply(con, 500, "", "Error occured\r\n");
+			close(outfd[1]);
 			goto cleanup;
 		} else {
 			write(outfd[1], input, strlen(input));
 			write(outfd[1], "\n", 1);
 		}
 	}
+	close(outfd[1]);
 
 	char output[CHUNK] = {0};
 	size_t n = read(infd[0], output, CHUNK);
@@ -136,7 +140,6 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 
 cleanup:
 	close(infd[0]);
-	close(outfd[1]);
 	kill(pid, SIGKILL);
 }
 
