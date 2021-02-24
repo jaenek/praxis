@@ -1,7 +1,7 @@
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <signal.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -9,16 +9,17 @@
 #include "mongoose.h"
 #include "sha256.h"
 
-#define LENGTH(X)   (sizeof X / sizeof X[0])
-#define STRFMT(str) (int) str.len, str.ptr
+#define LENGTH(X) (sizeof X / sizeof X[0])
+#define STRFMT(str) (int)str.len, str.ptr
 
 #include "tokens.h"
 
-bool token_auth(struct mg_http_message* msg) {
+bool token_auth(struct mg_http_message *msg)
+{
 	char token[32];
 	token[0] = '\0';
 
-    mg_http_get_var(&msg->query, "access_token", token, sizeof(token));
+	mg_http_get_var(&msg->query, "access_token", token, sizeof(token));
 	if (token[0] == '\0') {
 		// no password provided
 		return false;
@@ -28,10 +29,10 @@ bool token_auth(struct mg_http_message* msg) {
 	BYTE buf[SHA256_BLOCK_SIZE];
 
 	sha256_init(&ctx);
-	sha256_update(&ctx, (BYTE*)token, strlen(token));
+	sha256_update(&ctx, (BYTE *)token, strlen(token));
 	sha256_final(&ctx, buf);
 
-	for (int i = 0; i < LENGTH(tokens) ; i++) {
+	for (int i = 0; i < LENGTH(tokens); i++) {
 		if (memcmp(tokens[i], buf, SHA256_BLOCK_SIZE) == 0)
 			return true;
 	}
@@ -40,33 +41,35 @@ bool token_auth(struct mg_http_message* msg) {
 }
 
 struct cmd {
-	const char* command;
-	const char** vars; // NULL terminated variables list
+	const char *command;
+	const char **vars; // NULL terminated variables list
 };
 
 union arg {
-	const char* path;
+	const char *path;
 	const struct cmd cmd;
 };
 
-struct handler{
-	const char* method;
-	const char* path;
-	bool (*auth_func)(struct mg_http_message*);
-	void (*handle_func)(struct mg_connection*, struct mg_http_message*, const union arg*);
+struct handler {
+	const char *method;
+	const char *path;
+	bool (*auth_func)(struct mg_http_message *);
+	void (*handle_func)(struct mg_connection *, struct mg_http_message *, const union arg *);
 	const union arg arg;
 };
 
-void redirect_handler(struct mg_connection* con, struct mg_http_message* msg, const union arg* arg) {
-	const char* header_fmt = "HTTP/1.1 302 Found\r\nLocation: %s\r\nContent-Length: 0\r\n\r\n";
+void redirect_handler(struct mg_connection *con, struct mg_http_message *msg, const union arg *arg)
+{
+	const char *header_fmt = "HTTP/1.1 302 Found\r\nLocation: %s\r\nContent-Length: 0\r\n\r\n";
 	size_t len = strlen(arg->path) + strlen(header_fmt) - 1;
-	char* header = malloc(len);
+	char *header = malloc(len);
 	snprintf(header, len, header_fmt, arg->path);
 	mg_send(con, header, len);
 	free(header);
 }
 
-void spawn_handler(struct mg_connection* con, struct mg_http_message* msg, const union arg* arg) {
+void spawn_handler(struct mg_connection *con, struct mg_http_message *msg, const union arg *arg)
+{
 	pid_t pid;
 	if ((pid = fork()) == 0) {
 		setsid();
@@ -74,14 +77,15 @@ void spawn_handler(struct mg_connection* con, struct mg_http_message* msg, const
 		printf("praxis: execl %s", arg->cmd.command);
 		perror(" failed");
 		exit(EXIT_SUCCESS);
-	} else if(pid == -1) {
+	} else if (pid == -1) {
 		mg_http_reply(con, 500, "", "Error occured\r\n");
 		perror("praxis: fork() failed");
 	}
 }
 
 #define CHUNK 1024
-void data_handler(struct mg_connection* con, struct mg_http_message* msg, const union arg* arg) {
+void data_handler(struct mg_connection *con, struct mg_http_message *msg, const union arg *arg)
+{
 	int infd[2];
 	int outfd[2];
 	pid_t pid;
@@ -101,7 +105,7 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 		close(infd[1]);
 		close(outfd[0]);
 		exit(EXIT_SUCCESS);
-	} else if(pid == -1) {
+	} else if (pid == -1) {
 		mg_http_reply(con, 500, "", "Error occured\r\n");
 		perror("praxis: fork() failed");
 		return;
@@ -112,7 +116,7 @@ void data_handler(struct mg_connection* con, struct mg_http_message* msg, const 
 	close(outfd[0]);
 
 	char input[CHUNK] = {0};
-	const struct mg_str* data = mg_strcmp(msg->method, mg_str("GET")) == 0 ? &(msg->query) : &(msg->body);
+	const struct mg_str *data = mg_strcmp(msg->method, mg_str("GET")) == 0 ? &(msg->query) : &(msg->body);
 	for (int i = 0; arg->cmd.vars[i] != NULL; i++) {
 		if (mg_http_get_var(data, arg->cmd.vars[i], input, CHUNK) <= 0) {
 			LOG(LL_ERROR, ("\nData handler input failed!"));
@@ -151,23 +155,25 @@ void sigchld_handler(int s)
 	// waitpid() might overwrite errno, so we save and restore it:
 	int saved_errno = errno;
 
-	while(waitpid(-1, NULL, WNOHANG) > 0);
+	while (waitpid(-1, NULL, WNOHANG) > 0)
+		;
 
 	errno = saved_errno;
 }
 
-static void handle_request(struct mg_connection* con, int event, void* data, void* fn_data) {
-	(void) fn_data; // function specific data (not used)
+static void handle_request(struct mg_connection *con, int event, void *data, void *fn_data)
+{
+	(void)fn_data; // function specific data (not used)
 
 	if (event != MG_EV_HTTP_MSG)
 		return;
 
-	struct mg_http_message* msg = (struct mg_http_message*) data;
+	struct mg_http_message *msg = (struct mg_http_message *)data;
 
 	for (int i = 0; i < LENGTH(handlers); i++) {
 		if (!mg_http_match_uri(msg, handlers[i].path)) {
 			if (i == LENGTH(handlers) - 1) {
-				mg_http_serve_dir(con, msg, &(struct mg_http_serve_opts){ root_dir, "#.shtml" });
+				mg_http_serve_dir(con, msg, &(struct mg_http_serve_opts){root_dir, "#.shtml"});
 				break;
 			} else {
 				continue;
@@ -187,7 +193,8 @@ static void handle_request(struct mg_connection* con, int event, void* data, voi
 	}
 }
 
-int main(void) {
+int main(void)
+{
 	struct mg_mgr mgr;
 
 	// reap all dead processes
@@ -210,7 +217,8 @@ int main(void) {
 
 	// Start infinite event loop
 	LOG(LL_INFO, ("Starting Mongoose v%s", MG_VERSION));
-	for (;;) mg_mgr_poll(&mgr, 1000);
+	while (true)
+		mg_mgr_poll(&mgr, 1000);
 	mg_mgr_free(&mgr);
 
 	return 0;
