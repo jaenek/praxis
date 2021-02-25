@@ -1,16 +1,32 @@
-#include <errno.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/wait.h>
-#include <unistd.h>
 
+#include "command.h"
 #include "mongoose.h"
 #include "sha256.h"
 
 #define LENGTH(X) (sizeof X / sizeof X[0])
 #define STRFMT(str) (int)str.len, str.ptr
+
+struct http_handler {
+	const char *method;
+	const char *path;
+	int (*auth_func)(struct mg_http_message *);
+	void (*handle_func)(struct mg_connection *, const struct mg_http_message *, union arg *);
+	union arg arg;
+};
+
+void http_redirect_handler(struct mg_connection *, const struct mg_http_message *, union arg *);
+void http_spawn_handler(struct mg_connection *, const struct mg_http_message *, union arg *);
+void http_pipe_handler(struct mg_connection *, const struct mg_http_message *, union arg *);
+
+struct mqtt_handler {
+	const char *topic;
+	void (*handle_func)(struct mg_connection *, const struct mg_mqtt_message *, union arg *);
+	union arg arg;
+};
+
+void mqtt_spawn_handler(struct mg_connection *, const struct mg_mqtt_message *, union arg *);
+void mqtt_pipe_handler(struct mg_connection *, const struct mg_mqtt_message *, union arg *);
 
 #include "tokens.h"
 
@@ -40,113 +56,6 @@ bool token_auth(struct mg_http_message *msg)
 	return false;
 }
 
-struct cmd {
-	const char *command;
-	const char **vars; // NULL terminated variables list
-};
-
-union arg {
-	const char *path;
-	const struct cmd cmd;
-};
-
-struct handler {
-	const char *method;
-	const char *path;
-	bool (*auth_func)(struct mg_http_message *);
-	void (*handle_func)(struct mg_connection *, struct mg_http_message *, const union arg *);
-	const union arg arg;
-};
-
-void redirect_handler(struct mg_connection *con, struct mg_http_message *msg, const union arg *arg)
-{
-	const char *header_fmt = "HTTP/1.1 302 Found\r\nLocation: %s\r\nContent-Length: 0\r\n\r\n";
-	size_t len = strlen(arg->path) + strlen(header_fmt) - 1;
-	char *header = malloc(len);
-	snprintf(header, len, header_fmt, arg->path);
-	mg_send(con, header, len);
-	free(header);
-}
-
-void spawn_handler(struct mg_connection *con, struct mg_http_message *msg, const union arg *arg)
-{
-	pid_t pid;
-	if ((pid = fork()) == 0) {
-		setsid();
-		execl("/usr/bin/sh", "sh", "-c", arg->cmd.command, NULL);
-		printf("praxis: execl %s", arg->cmd.command);
-		perror(" failed");
-		exit(EXIT_SUCCESS);
-	} else if (pid == -1) {
-		mg_http_reply(con, 500, "", "Error occured\r\n");
-		perror("praxis: fork() failed");
-	}
-}
-
-#define CHUNK 1024
-void data_handler(struct mg_connection *con, struct mg_http_message *msg, const union arg *arg)
-{
-	int infd[2];
-	int outfd[2];
-	pid_t pid;
-
-	pipe(infd);
-	pipe(outfd);
-	if ((pid = fork()) == 0) {
-		close(infd[0]);
-		close(outfd[1]);
-		dup2(outfd[0], STDIN_FILENO);
-		dup2(infd[1], STDOUT_FILENO);
-		dup2(infd[1], STDERR_FILENO);
-		setsid();
-		execl("/usr/bin/sh", "sh", "-c", arg->cmd.command, NULL);
-		printf("praxis: execl %s", arg->cmd.command);
-		perror(" failed");
-		close(infd[1]);
-		close(outfd[0]);
-		exit(EXIT_SUCCESS);
-	} else if (pid == -1) {
-		mg_http_reply(con, 500, "", "Error occured\r\n");
-		perror("praxis: fork() failed");
-		return;
-	}
-
-	// close unused
-	close(infd[1]);
-	close(outfd[0]);
-
-	char input[CHUNK] = {0};
-	const struct mg_str *data = mg_strcmp(msg->method, mg_str("GET")) == 0 ? &(msg->query) : &(msg->body);
-	for (int i = 0; arg->cmd.vars[i] != NULL; i++) {
-		if (mg_http_get_var(data, arg->cmd.vars[i], input, CHUNK) <= 0) {
-			LOG(LL_ERROR, ("\nData handler input failed!"));
-			mg_http_reply(con, 500, "", "Error occured\r\n");
-			close(outfd[1]);
-			goto cleanup;
-		} else {
-			write(outfd[1], input, strlen(input));
-			write(outfd[1], "\n", 1);
-		}
-	}
-	close(outfd[1]);
-
-	char output[CHUNK] = {0};
-	size_t n = read(infd[0], output, CHUNK);
-	if (n == CHUNK) {
-		LOG(LL_ERROR, ("\nHandler output too big! Increase CHUNK size."));
-		mg_http_reply(con, 500, "", "Error occured\r\n");
-	} else if (n < 0) {
-		LOG(LL_ERROR, ("\nData handler output failed!"));
-		mg_http_reply(con, 500, "", "Error occured\r\n");
-	} else {
-		mg_http_reply(con, 200, "", "%s", output);
-	}
-
-cleanup:
-	close(infd[0]);
-	kill(pid, SIGKILL);
-}
-
 // include user configuration after usable function/structure definitions
 #include "config.h"
 
@@ -161,18 +70,14 @@ void sigchld_handler(int s)
 	errno = saved_errno;
 }
 
-static void handle_request(struct mg_connection *con, int event, void *data, void *fn_data)
+void handle_http(struct mg_connection *con, struct mg_http_message *msg)
 {
-	(void)fn_data; // function specific data (not used)
+	for (int i = 0; i < LENGTH(http_handlers); i++) {
+		if (strcmp(http_handlers[i].method, "MQTT") == 0)
+			continue;
 
-	if (event != MG_EV_HTTP_MSG)
-		return;
-
-	struct mg_http_message *msg = (struct mg_http_message *)data;
-
-	for (int i = 0; i < LENGTH(handlers); i++) {
-		if (!mg_http_match_uri(msg, handlers[i].path)) {
-			if (i == LENGTH(handlers) - 1) {
+		if (!mg_http_match_uri(msg, http_handlers[i].path)) {
+			if (i == LENGTH(http_handlers) - 1) {
 				mg_http_serve_dir(con, msg, &(struct mg_http_serve_opts){root_dir, "#.shtml"});
 				break;
 			} else {
@@ -180,10 +85,11 @@ static void handle_request(struct mg_connection *con, int event, void *data, voi
 			}
 		}
 
-		if (mg_strcmp(msg->method, mg_str(handlers[i].method)) == 0) {
-			if (handlers[i].auth_func == NULL || handlers[i].auth_func(msg)) {
+		if (mg_strcmp(msg->method, mg_str(http_handlers[i].method)) == 0) {
+			if (http_handlers[i].auth_func == NULL || http_handlers[i].auth_func(msg)) {
 				LOG(LL_INFO, ("\n%.*s", STRFMT(msg->message)));
-				handlers[i].handle_func(con, msg, &handlers[i].arg);
+				http_handlers[i].handle_func(con, (const struct mg_http_message *)msg,
+							     &http_handlers[i].arg);
 			} else {
 				char buf[40];
 				LOG(LL_INFO, ("\nAuthorization denied: %s", mg_straddr(con, buf, sizeof(buf))));
@@ -193,10 +99,54 @@ static void handle_request(struct mg_connection *con, int event, void *data, voi
 	}
 }
 
+void handle_mqtt_open(struct mg_connection *con)
+{
+	for (int i = 0; i < LENGTH(mqtt_handlers); i++) {
+		struct mg_str topic = mg_str(mqtt_handlers[i].topic);
+		mg_mqtt_sub(con, &topic);
+		LOG(LL_INFO, ("SUBSCRIBED to %.*s", STRFMT(topic)));
+	}
+}
+
+void handle_mqtt(struct mg_connection *con, struct mg_mqtt_message *msg)
+{
+	for (int i = 0; i < LENGTH(mqtt_handlers); i++) {
+		if (mg_strcmp(msg->topic, mg_str(mqtt_handlers[i].topic)) == 0) {
+			LOG(LL_INFO, ("RECEIVED %.*s <- %.*s", STRFMT(msg->data), STRFMT(msg->topic)));
+			mqtt_handlers[i].handle_func(con, msg, &mqtt_handlers[i].arg);
+		}
+	}
+}
+
+static void handle_request(struct mg_connection *con, int event, void *data, void *fn_data)
+{
+	(void)fn_data; // function specific data (not used)
+
+	switch (event) {
+	case MG_EV_ERROR: {
+		LOG(LL_ERROR, ("%p %s", con->fd, (char *)data));
+	} break;
+
+	case MG_EV_HTTP_MSG: {
+		handle_http(con, (struct mg_http_message *)data);
+	} break;
+
+	case MG_EV_MQTT_OPEN: {
+		handle_mqtt_open(con);
+	} break;
+
+	case MG_EV_MQTT_MSG: {
+		handle_mqtt(con, (struct mg_mqtt_message *)data);
+	} break;
+
+	default:
+		LOG(LL_DEBUG, ("Event not handled %p %s", con->fd, (char *)data));
+		break;
+	}
+}
+
 int main(void)
 {
-	struct mg_mgr mgr;
-
 	// reap all dead processes
 	struct sigaction sa;
 	sa.sa_handler = sigchld_handler;
@@ -208,8 +158,15 @@ int main(void)
 	}
 
 	// Initialise stuff
+	struct mg_mgr mgr;
+	struct mg_mqtt_opts opts = {
+		.client_id = mg_str("praxis"),
+	};
+
 	mg_log_set("2");
+
 	mg_mgr_init(&mgr);
+	mg_mqtt_connect(&mgr, mqtt_url, &opts, handle_request, NULL);
 	if (mg_http_listen(&mgr, listen_on, handle_request, &mgr) == NULL) {
 		LOG(LL_ERROR, ("Cannot listen on %s. Use http://ADDR:PORT or :PORT", listen_on));
 		exit(EXIT_FAILURE);

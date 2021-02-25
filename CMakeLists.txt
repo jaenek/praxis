@@ -17,6 +17,9 @@ add_library(sha256 vendor/sha256/sha256.c)
 target_include_directories(sha256 PUBLIC vendor/sha256)
 
 file(GLOB PROJECT_SOURCES
+	command.c
+	http.c
+	mqtt.c
 	main.c
 )
 add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
