@@ -158,15 +158,18 @@ int main(void)
 	}
 
 	// Initialise stuff
-	struct mg_mgr mgr;
-	struct mg_mqtt_opts opts = {
-		.client_id = mg_str("praxis"),
-	};
-
 	mg_log_set("2");
 
+	struct mg_mgr mgr;
 	mg_mgr_init(&mgr);
-	mg_mqtt_connect(&mgr, mqtt_url, &opts, handle_request, NULL);
+
+	if (strlen(mqtt_url) > 0) {
+		struct mg_mqtt_opts opts = {
+			.client_id = mg_str("praxis"),
+		};
+		mg_mqtt_connect(&mgr, mqtt_url, &opts, handle_request, NULL);
+	}
+
 	if (mg_http_listen(&mgr, listen_on, handle_request, &mgr) == NULL) {
 		LOG(LL_ERROR, ("Cannot listen on %s. Use http://ADDR:PORT or :PORT", listen_on));
 		exit(EXIT_FAILURE);
