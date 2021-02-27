@@ -24,3 +24,15 @@ file(GLOB PROJECT_SOURCES
 )
 add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
 target_link_libraries(${PROJECT_NAME} PRIVATE project_options mongoose sha256)
+
+macro(build_example NAME EXAMPLE_DEFINE)
+	add_executable(${PROJECT_NAME}_${NAME} ${PROJECT_SOURCES})
+	target_link_libraries(${PROJECT_NAME}_${NAME} PRIVATE project_options mongoose sha256)
+	target_compile_definitions(${PROJECT_NAME}_${NAME} PRIVATE -D ${EXAMPLE_DEFINE})
+endmacro()
+
+if(BUILD_EXAMPLES)
+	build_example(auth EXAMPLE_AUTH)
+	build_example(blog EXAMPLE_BLOG)
+	build_example(mqtt EXAMPLE_MQTT)
+endif()

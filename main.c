@@ -10,7 +10,7 @@
 struct http_handler {
 	const char *method;
 	const char *path;
-	int (*auth_func)(struct mg_http_message *);
+	bool (*auth_func)(struct mg_http_message *);
 	void (*handle_func)(struct mg_connection *, const struct mg_http_message *, union arg *);
 	union arg arg;
 };
@@ -57,7 +57,15 @@ bool token_auth(struct mg_http_message *msg)
 }
 
 // include user configuration after usable function/structure definitions
+#ifdef EXAMPLE_AUTH
+#include "examples/auth/config.h"
+#elif EXAMPLE_BLOG
+#include "examples/blog/config.h"
+#elif EXAMPLE_MQTT
+#include "examples/mqtt/config.h"
+#else
 #include "config.h"
+#endif
 
 void sigchld_handler(int s)
 {
@@ -99,6 +107,7 @@ void handle_http(struct mg_connection *con, struct mg_http_message *msg)
 	}
 }
 
+#ifdef ENABLE_MQTT
 void handle_mqtt_open(struct mg_connection *con)
 {
 	for (int i = 0; i < LENGTH(mqtt_handlers); i++) {
@@ -117,6 +126,7 @@ void handle_mqtt(struct mg_connection *con, struct mg_mqtt_message *msg)
 		}
 	}
 }
+#endif
 
 static void handle_request(struct mg_connection *con, int event, void *data, void *fn_data)
 {
@@ -131,6 +141,7 @@ static void handle_request(struct mg_connection *con, int event, void *data, voi
 		handle_http(con, (struct mg_http_message *)data);
 	} break;
 
+#ifdef ENABLE_MQTT
 	case MG_EV_MQTT_OPEN: {
 		handle_mqtt_open(con);
 	} break;
@@ -138,6 +149,7 @@ static void handle_request(struct mg_connection *con, int event, void *data, voi
 	case MG_EV_MQTT_MSG: {
 		handle_mqtt(con, (struct mg_mqtt_message *)data);
 	} break;
+#endif
 
 	default:
 		LOG(LL_DEBUG, ("Event not handled %p %s", con->fd, (char *)data));
@@ -163,12 +175,12 @@ int main(void)
 	struct mg_mgr mgr;
 	mg_mgr_init(&mgr);
 
-	if (strlen(mqtt_url) > 0) {
-		struct mg_mqtt_opts opts = {
-			.client_id = mg_str("praxis"),
-		};
-		mg_mqtt_connect(&mgr, mqtt_url, &opts, handle_request, NULL);
-	}
+#ifdef ENABLE_MQTT
+	struct mg_mqtt_opts opts = {
+		.client_id = mg_str("praxis"),
+	};
+	mg_mqtt_connect(&mgr, mqtt_url, &opts, handle_request, NULL);
+#endif
 
 	if (mg_http_listen(&mgr, listen_on, handle_request, &mgr) == NULL) {
 		LOG(LL_ERROR, ("Cannot listen on %s. Use http://ADDR:PORT or :PORT", listen_on));
