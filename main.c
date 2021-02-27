@@ -35,7 +35,8 @@ bool token_auth(struct mg_http_message *msg)
 	char token[32];
 	token[0] = '\0';
 
-	mg_http_get_var(&msg->query, "access_token", token, sizeof(token));
+	const struct mg_str *data = mg_strcmp(msg->method, mg_str("GET")) == 0 ? &(msg->query) : &(msg->body);
+	mg_http_get_var(data, "access_token", token, sizeof(token));
 	if (token[0] == '\0') {
 		// no password provided
 		return false;
